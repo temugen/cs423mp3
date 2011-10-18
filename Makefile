@@ -10,7 +10,7 @@ RM:=rm
 all: clean modules monitor work 
 
 obj-m:= mp3.o
-mp3-objs:= 
+#mp3-objs:= 
 
 modules:
 	$(MAKE) -C $(KERNEL_SRC) M=$(SUBDIR) modules
