@@ -1,5 +1,5 @@
-#ifndef __MP1_GIVEN_INCLUDE__
-#define __MP1_GIVEN_INCLUDE__
+#ifndef __MP3_GIVEN_INCLUDE__
+#define __MP3_GIVEN_INCLUDE__
 
 #include <linux/pid.h>
 
@@ -14,11 +14,12 @@ int get_cpu_use(int pid, unsigned long *min, unsigned long *maj, unsigned long *
 
    task=find_task_by_pid(pid);
 
-   if (task!=NULL) {  
+   if (task!=NULL) {
      *cpu_use=task->utime;
+     *maj=task->maj_flt;
+     *min=task->min_flt;
 
-     /* please extend this part to read the page fault counts
-        and to reset the all three read values in PCB */
+     task->utime = task->maj_flt = task->min_flt = 0;
 
      rcu_read_unlock();
      return 0;
