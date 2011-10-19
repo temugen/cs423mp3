@@ -72,32 +72,32 @@ void work_handler(struct work_struct *w)
 {
     struct list_head *pos;
     struct task *p;
-    unsigned long utilization, major_faults, minor_faults;
+    int i = 0;
 
     //re-add the work to the queue to ensure 20 Hz
     queue_delayed_work(workqueue, &work, WORK_PERIOD);
-
-    current_sample->utilization = current_sample->major_faults = current_sample->minor_faults = 0;
 
     //sum the statistics
     mutex_lock(&list_mutex);
     list_for_each(pos, &task_list)
     {
         p = list_entry(pos, struct task, task_node);
-        get_cpu_use(p->pid, &minor_faults, &major_faults, &utilization);
-        p->utilization += utilization;
-        p->major_faults += major_faults;
-        p->minor_faults += minor_faults;
-        current_sample->utilization += p->utilization;
-        current_sample->major_faults += p->major_faults;
-        current_sample->minor_faults += p->minor_faults;
+        get_cpu_use(p->pid, &current_sample->minor_faults, &current_sample->major_faults, &current_sample->utilization);
+        i++;
     }
     mutex_unlock(&list_mutex);
 
-    //move the current sample down the ring buffer
-    current_sample++;
-    if(current_sample >= (struct sample *)(buffer + BUFFER_SIZE))
-        current_sample = (struct sample *)buffer;
+    if(i > 0)
+    {
+        //move the current sample down the ring buffer
+        current_sample++;
+        if(current_sample >= (struct sample *)(buffer + BUFFER_SIZE))
+            current_sample = (struct sample *)buffer;
+    }
+    else
+    {
+        printk("WARNING: Workqueue found no tasks.\n");
+    }
 }
 
 int proc_registration_read(char *page, char **start, off_t off, int count, int* eof, void* data)
@@ -106,12 +106,13 @@ int proc_registration_read(char *page, char **start, off_t off, int count, int* 
     struct list_head *pos;
     struct task *p;
 
+    //print the PIDs of the registered tasks.
     i = 0;
     mutex_lock(&list_mutex);
     list_for_each(pos, &task_list)
     {
         p = list_entry(pos, struct task, task_node);
-        i += sprintf(page+off+i, "%lu\n", p->pid);
+        i += sprintf(page + off + i, "%lu\n", p->pid);
     }
     mutex_unlock(&list_mutex);
     *eof = 1;
@@ -123,6 +124,7 @@ int proc_registration_read(char *page, char **start, off_t off, int count, int* 
 int register_task(unsigned long pid)
 {
     struct task* newtask;
+    struct task_struct *linux_task;
 
     mutex_lock(&list_mutex);
     if (_lookup_task(pid) != NULL)
@@ -134,14 +136,15 @@ int register_task(unsigned long pid)
 
     newtask = kmalloc(sizeof(struct task), GFP_KERNEL);
     newtask->pid = pid;
-    newtask->linux_task = find_task_by_pid(pid);
+    linux_task = find_task_by_pid(pid);
 
+    //this is the first task in the list
     if(list_empty(&task_list))
     {
         workqueue = create_workqueue(WORKQUEUE_NAME);
 
         //reset the statistics in the PCB
-        newtask->linux_task->utime = newtask->linux_task->maj_flt = newtask->linux_task->min_flt = 0;
+        linux_task->utime = linux_task->maj_flt = linux_task->min_flt = 0;
         queue_delayed_work(workqueue, &work, WORK_PERIOD);
     }
 
@@ -185,6 +188,22 @@ copy_fail:
     return count;
 }
 
+static int vfd_open(struct inode *inode, struct file *filp)
+{
+    return 0;
+}
+
+static int vfd_release(struct inode *inode, struct file *filp)
+{
+    return 0;
+}
+
+static int vfd_mmap(struct file *filp, struct vm_area_struct *vma)
+{
+    remap_pfn_range(vma, vma->vm_start, buffer_pfn, PAGE_SIZE, PAGE_SHARED);
+    return 0;
+}
+
 //THIS FUNCTION GETS EXECUTED WHEN THE MODULE GETS LOADED
 //NOTE THE __INIT ANNOTATION AND THE FUNCTION PROTOTYPE
 int __init my_module_init(void)
@@ -196,6 +215,16 @@ int __init my_module_init(void)
 
     buffer = (char *)vmalloc(BUFFER_SIZE);
     current_sample = (struct sample *)buffer;
+    buffer_pfn = vmalloc_to_pfn(buffer);
+    buffer_page = pfn_to_page(buffer_pfn);
+    //set the reserved bit to prevent mem mgmt from working with the page
+    buffer_page->flags = buffer_page->flags | PG_reserved;
+
+    alloc_chrdev_region(&vfd_dev, 0, 1, DEVICE_NAME);
+    cdev_init(&vfd, &vfd_ops);
+    vfd.owner = THIS_MODULE;
+    vfd.ops = &vfd_ops;
+    cdev_add(&vfd, vfd_dev, 1);
 
     //THE EQUIVALENT TO PRINTF IN KERNEL SPACE
     printk(KERN_ALERT "MODULE LOADED\n");
@@ -215,8 +244,15 @@ void __exit my_module_exit(void)
         _destroy_workqueue();
     }
 
-    _destroy_task_list();
+    unregister_chrdev_region(vfd_dev, 1);
+    cdev_del(&vfd);
 
+    mutex_lock(&list_mutex);
+    _destroy_task_list();
+    mutex_unlock(&list_mutex);
+
+    //clear the reserved bit just in case
+    buffer_page->flags = buffer_page->flags & ~PG_reserved;
     vfree(buffer);
 
     printk(KERN_ALERT "MODULE UNLOADED\n");

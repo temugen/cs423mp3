@@ -1,5 +1,5 @@
-#ifndef _SAMPLE_H_
-#define _SAMPLE_H_
+#ifndef __SAMPLE_H__
+#define __SAMPLE_H__
 
 struct sample
 {
