@@ -35,6 +35,14 @@ struct task* _lookup_task(unsigned long pid)
     return NULL;
 }
 
+void _destroy_workqueue(void)
+{
+    cancel_delayed_work(&work);
+    flush_workqueue(workqueue);
+    destroy_workqueue(workqueue);
+    workqueue = NULL;
+}
+
 //REMOVE TASK FROM LIST, MARK FOR DEREGISTRATION, CONTEXT SWITCH
 int deregister_task(unsigned long pid)
 {
@@ -50,14 +58,46 @@ int deregister_task(unsigned long pid)
     list_del(&t->task_node);
     mutex_unlock(&list_mutex);
 
+    //no more elements in the task list
     if(list_empty(&task_list))
     {
-        destroy_workqueue(workqueue);
+        _destroy_workqueue();
     }
-
     kfree(t);
 
     return 0;
+}
+
+void work_handler(struct work_struct *w)
+{
+    struct list_head *pos;
+    struct task *p;
+    unsigned long utilization, major_faults, minor_faults;
+
+    //re-add the work to the queue to ensure 20 Hz
+    queue_delayed_work(workqueue, &work, WORK_PERIOD);
+
+    current_sample->utilization = current_sample->major_faults = current_sample->minor_faults = 0;
+
+    //sum the statistics
+    mutex_lock(&list_mutex);
+    list_for_each(pos, &task_list)
+    {
+        p = list_entry(pos, struct task, task_node);
+        get_cpu_use(p->pid, &minor_faults, &major_faults, &utilization);
+        p->utilization += utilization;
+        p->major_faults += major_faults;
+        p->minor_faults += minor_faults;
+        current_sample->utilization += p->utilization;
+        current_sample->major_faults += p->major_faults;
+        current_sample->minor_faults += p->minor_faults;
+    }
+    mutex_unlock(&list_mutex);
+
+    //move the current sample down the ring buffer
+    current_sample++;
+    if(current_sample >= (struct sample *)(buffer + BUFFER_SIZE))
+        current_sample = (struct sample *)buffer;
 }
 
 int proc_registration_read(char *page, char **start, off_t off, int count, int* eof, void* data)
@@ -84,7 +124,13 @@ int register_task(unsigned long pid)
 {
     struct task* newtask;
 
-    if (_lookup_task(pid) != NULL) return -1;
+    mutex_lock(&list_mutex);
+    if (_lookup_task(pid) != NULL)
+    {
+        mutex_unlock(&list_mutex);
+        return -1;
+    }
+    mutex_unlock(&list_mutex);
 
     newtask = kmalloc(sizeof(struct task), GFP_KERNEL);
     newtask->pid = pid;
@@ -93,6 +139,10 @@ int register_task(unsigned long pid)
     if(list_empty(&task_list))
     {
         workqueue = create_workqueue(WORKQUEUE_NAME);
+
+        //reset the statistics in the PCB
+        newtask->linux_task->utime = newtask->linux_task->maj_flt = newtask->linux_task->min_flt = 0;
+        queue_delayed_work(workqueue, &work, WORK_PERIOD);
     }
 
     mutex_lock(&list_mutex);
@@ -145,6 +195,7 @@ int __init my_module_init(void)
     register_task_file->write_proc = proc_registration_write;
 
     buffer = (char *)vmalloc(BUFFER_SIZE);
+    current_sample = (struct sample *)buffer;
 
     //THE EQUIVALENT TO PRINTF IN KERNEL SPACE
     printk(KERN_ALERT "MODULE LOADED\n");
@@ -158,6 +209,11 @@ void __exit my_module_exit(void)
 {
     remove_proc_entry(PROC_FILENAME, proc_dir);
     remove_proc_entry(PROC_DIRNAME, NULL);
+
+    if(workqueue != NULL)
+    {
+        _destroy_workqueue();
+    }
 
     _destroy_task_list();
 

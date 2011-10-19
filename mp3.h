@@ -8,10 +8,13 @@
 #include <linux/list.h>
 #include <asm/uaccess.h>
 
+#include "sample.h"
 #include "mp3_given.h"
 
-#define JIFF_TO_MS(t) ((t*1000)/ HZ)
-#define MS_TO_JIFF(j) ((j * HZ) / 1000)
+#define WORK_HZ 20
+#define JIFF_TO_MS(t) (((t)*1000)/ HZ)
+#define MS_TO_JIFF(j) (((j) * HZ) / 1000)
+#define WORK_PERIOD MS_TO_JIFF(1000 / WORK_HZ)
 
 #define PROC_DIRNAME "mp3"
 #define PROC_FILENAME "status"
@@ -34,6 +37,10 @@ static struct proc_dir_entry *register_task_file;
 
 struct workqueue_struct *workqueue;
 char *buffer;
+struct sample *current_sample;
+
+void work_handler(struct work_struct *w);
+static DECLARE_DELAYED_WORK(work, work_handler);
 
 LIST_HEAD(task_list);
 static DEFINE_MUTEX(list_mutex);
