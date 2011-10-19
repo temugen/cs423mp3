@@ -82,6 +82,7 @@ void work_handler(struct work_struct *w)
     list_for_each(pos, &task_list)
     {
         p = list_entry(pos, struct task, task_node);
+        current_sample->timestamp = jiffies;
         get_cpu_use(p->pid, &current_sample->minor_faults, &current_sample->major_faults, &current_sample->utilization);
         i++;
     }
