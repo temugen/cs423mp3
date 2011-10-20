@@ -38,17 +38,15 @@ struct task
 static struct proc_dir_entry *proc_dir;
 static struct proc_dir_entry *register_task_file;
 
-struct workqueue_struct *workqueue;
-char *buffer;
-int buffer_pfn;
-struct page *buffer_page;
-struct sample *current_sample;
+static struct workqueue_struct *workqueue;
+static char *buffer;
+static struct sample *current_sample;
 
-void work_handler(struct work_struct *w);
+static void work_handler(struct work_struct *w);
 static DECLARE_DELAYED_WORK(work, work_handler);
 
-struct cdev vfd;
-dev_t vfd_dev;
+static struct cdev vfd;
+static dev_t vfd_dev;
 static int vfd_open(struct inode *inode, struct file *filp);
 static int vfd_release(struct inode *inode, struct file *filp);
 static int vfd_mmap(struct file *filp, struct vm_area_struct *vma);
@@ -60,6 +58,6 @@ static struct file_operations vfd_ops =
     .owner = THIS_MODULE
 };
 
-LIST_HEAD(task_list);
+static LIST_HEAD(task_list);
 static DEFINE_MUTEX(list_mutex);
 #endif

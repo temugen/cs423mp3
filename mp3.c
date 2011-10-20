@@ -68,7 +68,7 @@ int deregister_task(unsigned long pid)
     return 0;
 }
 
-void work_handler(struct work_struct *w)
+static void work_handler(struct work_struct *w)
 {
     struct list_head *pos;
     struct task *p;
@@ -125,7 +125,7 @@ int proc_registration_read(char *page, char **start, off_t off, int count, int* 
 int register_task(unsigned long pid)
 {
     struct task* newtask;
-    struct task_struct *linux_task;
+    unsigned long temp;
 
     mutex_lock(&list_mutex);
     if (_lookup_task(pid) != NULL)
@@ -137,15 +137,13 @@ int register_task(unsigned long pid)
 
     newtask = kmalloc(sizeof(struct task), GFP_KERNEL);
     newtask->pid = pid;
-    linux_task = find_task_by_pid(pid);
+    //reset the statistics
+    get_cpu_use(pid, &temp, &temp, &temp);
 
     //this is the first task in the list
     if(list_empty(&task_list))
     {
         workqueue = create_workqueue(WORKQUEUE_NAME);
-
-        //reset the statistics in the PCB
-        linux_task->utime = linux_task->maj_flt = linux_task->min_flt = 0;
         queue_delayed_work(workqueue, &work, WORK_PERIOD);
     }
 
@@ -201,8 +199,52 @@ static int vfd_release(struct inode *inode, struct file *filp)
 
 static int vfd_mmap(struct file *filp, struct vm_area_struct *vma)
 {
-    remap_pfn_range(vma, vma->vm_start, buffer_pfn, PAGE_SIZE, PAGE_SHARED);
+    //remap_pfn_range(vma, vma->vm_start, buffer_pfn, PAGE_SIZE, PAGE_SHARED);
     return 0;
+}
+
+//ALLOCATE VIRTUALLY CONTIGUOUS MEMORY FOR USER SPACE USE
+void *uvmalloc(unsigned long size)
+{
+    char *mem, *addr;
+
+    size = PAGE_ALIGN(size);
+    mem = addr = vmalloc(size);
+
+    if(mem)
+    {
+        while(size > 0)
+        {
+            SetPageReserved(vmalloc_to_page(addr));
+            addr += PAGE_SIZE;
+
+            //we have an unsigned value, be careful
+            if(PAGE_SIZE > size)
+                size = 0;
+            else
+                size -= PAGE_SIZE;
+        }
+    }
+    return mem;
+}
+
+void uvfree(void *mem, unsigned long size)
+{
+    char *addr = mem;
+    if(mem)
+    {
+        while(size > 0)
+        {
+            ClearPageReserved(vmalloc_to_page(addr));
+            addr += PAGE_SIZE;
+
+            if(PAGE_SIZE > size)
+                size = 0;
+            else
+                size -= PAGE_SIZE;
+        }
+        vfree(mem);
+    }
 }
 
 //THIS FUNCTION GETS EXECUTED WHEN THE MODULE GETS LOADED
@@ -214,12 +256,10 @@ int __init my_module_init(void)
     register_task_file->read_proc = proc_registration_read;
     register_task_file->write_proc = proc_registration_write;
 
-    buffer = (char *)vmalloc(BUFFER_SIZE);
+    buffer = (char *)uvmalloc(BUFFER_SIZE);
     current_sample = (struct sample *)buffer;
-    buffer_pfn = vmalloc_to_pfn(buffer);
-    buffer_page = pfn_to_page(buffer_pfn);
-    //set the reserved bit to prevent mem mgmt from working with the page
-    buffer_page->flags = buffer_page->flags | PG_reserved;
+    //buffer_pfn = vmalloc_to_pfn(buffer);
+    //buffer_page = pfn_to_page(buffer_pfn);
 
     alloc_chrdev_region(&vfd_dev, 0, 1, DEVICE_NAME);
     cdev_init(&vfd, &vfd_ops);
@@ -252,9 +292,7 @@ void __exit my_module_exit(void)
     _destroy_task_list();
     mutex_unlock(&list_mutex);
 
-    //clear the reserved bit just in case
-    buffer_page->flags = buffer_page->flags & ~PG_reserved;
-    vfree(buffer);
+    uvfree(buffer, BUFFER_SIZE);
 
     printk(KERN_ALERT "MODULE UNLOADED\n");
 }
