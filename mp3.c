@@ -82,6 +82,7 @@ static void work_handler(struct work_struct *w)
     queue_delayed_work(workqueue, &work, WORK_PERIOD);
 
     current_sample->timestamp = jiffies;
+    current_sample->major_faults = current_sample->minor_faults = current_sample->utilization = 0;
     //sum the statistics
     mutex_lock(&list_mutex);
     list_for_each(pos, &task_list)
