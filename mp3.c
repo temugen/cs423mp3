@@ -199,7 +199,21 @@ static int vfd_release(struct inode *inode, struct file *filp)
 
 static int vfd_mmap(struct file *filp, struct vm_area_struct *vma)
 {
-    //remap_pfn_range(vma, vma->vm_start, buffer_pfn, PAGE_SIZE, PAGE_SHARED);
+    char *addr;
+    unsigned long pfn, size = BUFFER_SIZE;
+    addr = buffer;
+
+    while(size > 0)
+    {
+        pfn = vmalloc_to_pfn(addr);
+        remap_pfn_range(vma, vma->vm_start + (addr - buffer), pfn, PAGE_SIZE, PAGE_SHARED);
+        addr += PAGE_SIZE;
+
+        if(PAGE_SIZE > size)
+            size = 0;
+        else
+            size -= PAGE_SIZE;
+    }
     return 0;
 }
 
@@ -231,6 +245,7 @@ void *uvmalloc(unsigned long size)
 void uvfree(void *mem, unsigned long size)
 {
     char *addr = mem;
+
     if(mem)
     {
         while(size > 0)
