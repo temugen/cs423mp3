@@ -19,7 +19,7 @@ int get_cpu_use(int pid, unsigned long *min, unsigned long *maj, unsigned long *
      *maj=task->maj_flt;
      *min=task->min_flt;
 
-     //task->utime = task->maj_flt = task->min_flt = 0;
+     task->utime = task->maj_flt = task->min_flt = 0;
 
      rcu_read_unlock();
      return 0;
