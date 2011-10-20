@@ -62,6 +62,9 @@ int deregister_task(unsigned long pid)
     if(list_empty(&task_list))
     {
         _destroy_workqueue();
+        //mark the end of our statistics
+        *(long *)current_sample = -1;
+        current_sample = (struct sample *)buffer;
     }
     kfree(t);
 
@@ -72,18 +75,22 @@ static void work_handler(struct work_struct *w)
 {
     struct list_head *pos;
     struct task *p;
+    unsigned long minor_faults, major_faults, utilization;
     int i = 0;
 
     //re-add the work to the queue to ensure 20 Hz
     queue_delayed_work(workqueue, &work, WORK_PERIOD);
 
+    current_sample->timestamp = jiffies;
     //sum the statistics
     mutex_lock(&list_mutex);
     list_for_each(pos, &task_list)
     {
         p = list_entry(pos, struct task, task_node);
-        current_sample->timestamp = jiffies;
-        get_cpu_use(p->pid, &current_sample->minor_faults, &current_sample->major_faults, &current_sample->utilization);
+        get_cpu_use(p->pid, &minor_faults, &major_faults, &utilization);
+        current_sample->minor_faults += minor_faults;
+        current_sample->major_faults += major_faults;
+        current_sample->utilization += utilization;
         i++;
     }
     mutex_unlock(&list_mutex);
@@ -199,6 +206,7 @@ static int vfd_release(struct inode *inode, struct file *filp)
 
 static int vfd_mmap(struct file *filp, struct vm_area_struct *vma)
 {
+    //remap_vmalloc_range(vma, buffer, 0);
     char *addr;
     unsigned long pfn, size = BUFFER_SIZE;
     addr = buffer;
@@ -273,8 +281,6 @@ int __init my_module_init(void)
 
     buffer = (char *)uvmalloc(BUFFER_SIZE);
     current_sample = (struct sample *)buffer;
-    //buffer_pfn = vmalloc_to_pfn(buffer);
-    //buffer_page = pfn_to_page(buffer_pfn);
 
     alloc_chrdev_region(&vfd_dev, 0, 1, DEVICE_NAME);
     cdev_init(&vfd, &vfd_ops);
@@ -283,7 +289,7 @@ int __init my_module_init(void)
     cdev_add(&vfd, vfd_dev, 1);
 
     //THE EQUIVALENT TO PRINTF IN KERNEL SPACE
-    printk(KERN_ALERT "MODULE LOADED\n");
+    printk(KERN_ALERT "MODULE LOADED with BUFFER_SIZE=%lu\n", BUFFER_SIZE);
 
     return 0;
 }
