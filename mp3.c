@@ -56,7 +56,6 @@ int deregister_task(unsigned long pid)
     }
 
     list_del(&t->task_node);
-    mutex_unlock(&list_mutex);
 
     //no more elements in the task list
     if(list_empty(&task_list))
@@ -66,6 +65,7 @@ int deregister_task(unsigned long pid)
         current_sample->timestamp = -1;
         current_sample = (struct sample *)buffer;
     }
+    mutex_unlock(&list_mutex);
     kfree(t);
 
     return 0;
@@ -148,6 +148,7 @@ int register_task(unsigned long pid)
     //reset the statistics
     get_cpu_use(pid, &temp, &temp, &temp);
 
+    mutex_lock(&list_mutex);
     //this is the first task in the list
     if(list_empty(&task_list))
     {
@@ -155,7 +156,6 @@ int register_task(unsigned long pid)
         queue_delayed_work(workqueue, &work, WORK_PERIOD);
     }
 
-    mutex_lock(&list_mutex);
     _insert_task(newtask);
     mutex_unlock(&list_mutex);
 
