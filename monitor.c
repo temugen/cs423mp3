@@ -8,26 +8,22 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <stdlib.h>
-
-#define NPAGES (128)   // The size of profiler buffer (Unit: memory page)
-#define BUFD_MAX 48000 // The max number of profiled samples stored in the profiler buffer
+#include "sample.h"
 
 static int buf_fd = -1;
-static int buf_len;
 
 // This function opens a character device (which is pointed by a file named as fname) and performs the mmap() operation. If the operations are successful, the base address of memory mapped buffer is returned. Otherwise, a NULL pointer is returned.
 void *buf_init(char *fname)
 {
-  unsigned int *kadr;
+  char *kadr;
 
   if(buf_fd == -1){
-    buf_len = NPAGES * getpagesize();
     if ((buf_fd=open(fname, O_RDWR|O_SYNC))<0){
         printf("file open error. %s\n", fname);
         return NULL;
     }
   }
-  kadr = mmap(0, buf_len, PROT_READ|PROT_WRITE, MAP_SHARED, buf_fd, 0);
+  kadr = mmap(0, BUFFER_SIZE, PROT_READ|PROT_WRITE, MAP_SHARED, buf_fd, 0);
   if (kadr == MAP_FAILED){
       printf("buf file open error.\n");
       return NULL;
@@ -47,42 +43,20 @@ void buf_exit()
 
 int main(int argc, char* argv[])
 {
-  long *buf;
-  int index = 0;
+  struct sample *buf;
   int i;
 
   // Open the char device and mmap()
-  buf = buf_init("node");
+  buf = (struct sample *)buf_init("node");
   if(!buf)
     return -1;
-  
+
   // Read and print profiled data
-  for(index=0; index<BUFD_MAX; index++)
-    if(buf[index] != -1) break;
-
-  i = 0;
-  while(buf[index] != -1){
-    printf("%d ", buf[index]);
-    buf[index++] = -1;
-    if(index >= BUFD_MAX)
-      index = 0;
-
-    printf("%d ", buf[index]);
-    buf[index++] = -1;
-    if(index >= BUFD_MAX)
-      index = 0;
-
-    printf("%d ", buf[index]);
-    buf[index++] = -1;
-    if(index >= BUFD_MAX)
-      index = 0;
-
-    printf("%d\n", buf[index]);
-    buf[index++] = -1;
-    if(index >= BUFD_MAX)
-      index = 0;
-    i++;
+  for(i=0; i < NUM_SAMPLES && buf[i].timestamp != -1; i++)
+  {
+    printf("%lu %lu %lu %lu\n", buf[i].timestamp, buf[i].major_faults, buf[i].minor_faults, buf[i].utilization);
   }
+
   printf("read %d profiled data\n", i);
 
   // Close the char device

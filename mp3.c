@@ -63,7 +63,7 @@ int deregister_task(unsigned long pid)
     {
         _destroy_workqueue();
         //mark the end of our statistics
-        *(long *)current_sample = -1;
+        current_sample->timestamp = -1;
         current_sample = (struct sample *)buffer;
     }
     kfree(t);
@@ -206,68 +206,7 @@ static int vfd_release(struct inode *inode, struct file *filp)
 
 static int vfd_mmap(struct file *filp, struct vm_area_struct *vma)
 {
-    //remap_vmalloc_range(vma, buffer, 0);
-    char *addr;
-    unsigned long pfn, size = BUFFER_SIZE;
-    addr = buffer;
-
-    while(size > 0)
-    {
-        pfn = vmalloc_to_pfn(addr);
-        remap_pfn_range(vma, vma->vm_start + (addr - buffer), pfn, PAGE_SIZE, PAGE_SHARED);
-        addr += PAGE_SIZE;
-
-        if(PAGE_SIZE > size)
-            size = 0;
-        else
-            size -= PAGE_SIZE;
-    }
-    return 0;
-}
-
-//ALLOCATE VIRTUALLY CONTIGUOUS MEMORY FOR USER SPACE USE
-void *uvmalloc(unsigned long size)
-{
-    char *mem, *addr;
-
-    size = PAGE_ALIGN(size);
-    mem = addr = vmalloc(size);
-
-    if(mem)
-    {
-        while(size > 0)
-        {
-            SetPageReserved(vmalloc_to_page(addr));
-            addr += PAGE_SIZE;
-
-            //we have an unsigned value, be careful
-            if(PAGE_SIZE > size)
-                size = 0;
-            else
-                size -= PAGE_SIZE;
-        }
-    }
-    return mem;
-}
-
-void uvfree(void *mem, unsigned long size)
-{
-    char *addr = mem;
-
-    if(mem)
-    {
-        while(size > 0)
-        {
-            ClearPageReserved(vmalloc_to_page(addr));
-            addr += PAGE_SIZE;
-
-            if(PAGE_SIZE > size)
-                size = 0;
-            else
-                size -= PAGE_SIZE;
-        }
-        vfree(mem);
-    }
+    return remap_vmalloc_range(vma, buffer, 0);
 }
 
 //THIS FUNCTION GETS EXECUTED WHEN THE MODULE GETS LOADED
@@ -279,7 +218,7 @@ int __init my_module_init(void)
     register_task_file->read_proc = proc_registration_read;
     register_task_file->write_proc = proc_registration_write;
 
-    buffer = (char *)uvmalloc(BUFFER_SIZE);
+    buffer = (char *)vmalloc_user(BUFFER_SIZE);
     current_sample = (struct sample *)buffer;
 
     alloc_chrdev_region(&vfd_dev, 0, 1, DEVICE_NAME);
@@ -313,7 +252,7 @@ void __exit my_module_exit(void)
     _destroy_task_list();
     mutex_unlock(&list_mutex);
 
-    uvfree(buffer, BUFFER_SIZE);
+    vfree(buffer);
 
     printk(KERN_ALERT "MODULE UNLOADED\n");
 }

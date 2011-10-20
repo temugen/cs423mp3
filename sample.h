@@ -9,4 +9,8 @@ struct sample
                   utilization;
 };
 
+#define WORK_HZ 20
+#define NUM_SAMPLES (600 * WORK_HZ)
+#define BUFFER_SIZE (NUM_SAMPLES * sizeof(struct sample))
+
 #endif

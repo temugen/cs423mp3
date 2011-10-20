@@ -14,7 +14,6 @@
 #include "mp3_given.h"
 
 #define DEVICE_NAME "MP3"
-#define WORK_HZ 20
 #define JIFF_TO_MS(t) (((t)*1000)/ HZ)
 #define MS_TO_JIFF(j) (((j) * HZ) / 1000)
 #define WORK_PERIOD MS_TO_JIFF(1000 / WORK_HZ)
@@ -23,10 +22,6 @@
 #define PROC_FILENAME "status"
 #define UPDATE_THREAD_NAME "kmp3"
 #define WORKQUEUE_NAME "mp3wq"
-
-//4KB buffer
-#define NUM_SAMPLES (600 * WORK_HZ)
-#define BUFFER_SIZE (NUM_SAMPLES * sizeof(struct sample))
 
 struct task
 {
