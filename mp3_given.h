@@ -15,7 +15,7 @@ int get_cpu_use(int pid, unsigned long *min, unsigned long *maj, unsigned long *
    task=find_task_by_pid(pid);
 
    if (task!=NULL) {
-     *cpu_use=task->utime;
+     *cpu_use=task->utime + task->stime;
      *maj=task->maj_flt;
      *min=task->min_flt;
 

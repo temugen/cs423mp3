@@ -95,6 +95,9 @@ static void work_handler(struct work_struct *w)
         i++;
     }
     mutex_unlock(&list_mutex);
+    current_sample->utilization *= 100;
+    current_sample->utilization /= (current_sample->timestamp - last_jiffies);
+    last_jiffies = jiffies;
 
     if(i > 0)
     {
@@ -152,6 +155,7 @@ int register_task(unsigned long pid)
     //this is the first task in the list
     if(list_empty(&task_list))
     {
+        last_jiffies = jiffies;
         workqueue = create_workqueue(WORKQUEUE_NAME);
         queue_delayed_work(workqueue, &work, WORK_PERIOD);
     }
