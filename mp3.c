@@ -14,12 +14,14 @@ void _destroy_task_list(void)
     }
 }
 
+//INSERTS A TASK INTO OUR LINKED LIST
 void _insert_task(struct task* t)
 {
     BUG_ON(t == NULL);
     list_add_tail(&t->task_node, &task_list);
 }
 
+//FINDS A TASK BY PID
 struct task* _lookup_task(unsigned long pid)
 {
     struct list_head *pos;
@@ -33,14 +35,6 @@ struct task* _lookup_task(unsigned long pid)
     }
 
     return NULL;
-}
-
-void _destroy_workqueue(void)
-{
-    cancel_delayed_work(&work);
-    flush_workqueue(workqueue);
-    destroy_workqueue(workqueue);
-    workqueue = NULL;
 }
 
 //REMOVE TASK FROM LIST, MARK FOR DEREGISTRATION, CONTEXT SWITCH
@@ -60,7 +54,9 @@ int deregister_task(unsigned long pid)
     //no more elements in the task list
     if(list_empty(&task_list))
     {
-        _destroy_workqueue();
+        //remove all work
+        work_done = 1;
+        cancel_delayed_work(&work);
         //mark the end of our statistics
         current_sample->timestamp = -1;
         current_sample = (struct sample *)buffer;
@@ -71,6 +67,7 @@ int deregister_task(unsigned long pid)
     return 0;
 }
 
+//HANDLES SAMPLING EVERY WORK_PERIOD
 static void work_handler(struct work_struct *w)
 {
     struct list_head *pos;
@@ -80,6 +77,11 @@ static void work_handler(struct work_struct *w)
 
     //re-add the work to the queue to ensure 20 Hz
     queue_delayed_work(workqueue, &work, WORK_PERIOD);
+
+    if(work_done) {
+        cancel_delayed_work(&work);
+        work_done = 0;
+    }
 
     current_sample->timestamp = jiffies;
     current_sample->major_faults = current_sample->minor_faults = current_sample->utilization = 0;
@@ -112,6 +114,7 @@ static void work_handler(struct work_struct *w)
     }
 }
 
+//PRINT INFO WHEN PROC FILE IS READ
 int proc_registration_read(char *page, char **start, off_t off, int count, int* eof, void* data)
 {
     off_t i;
@@ -156,7 +159,6 @@ int register_task(unsigned long pid)
     if(list_empty(&task_list))
     {
         last_jiffies = jiffies;
-        workqueue = create_workqueue(WORKQUEUE_NAME);
         queue_delayed_work(workqueue, &work, WORK_PERIOD);
     }
 
@@ -166,6 +168,7 @@ int register_task(unsigned long pid)
     return 0;
 }
 
+//HANDLES REGISTRATION AND DEREGISTRATION
 int proc_registration_write(struct file *file, const char *buffer, unsigned long count, void *data)
 {
     char *proc_buffer;
@@ -209,6 +212,7 @@ static int vfd_release(struct inode *inode, struct file *filp)
     return 0;
 }
 
+//MAPS OUR BUFFER TO USER SPACE ADDRESSES
 static int vfd_mmap(struct file *filp, struct vm_area_struct *vma)
 {
     return remap_vmalloc_range(vma, buffer, 0);
@@ -218,19 +222,25 @@ static int vfd_mmap(struct file *filp, struct vm_area_struct *vma)
 //NOTE THE __INIT ANNOTATION AND THE FUNCTION PROTOTYPE
 int __init my_module_init(void)
 {
+    //proc entry
     proc_dir = proc_mkdir(PROC_DIRNAME, NULL);
     register_task_file = create_proc_entry(PROC_FILENAME, 0666, proc_dir);
     register_task_file->read_proc = proc_registration_read;
     register_task_file->write_proc = proc_registration_write;
 
+    //buffer for userspace
     buffer = (char *)vmalloc_user(BUFFER_SIZE);
     current_sample = (struct sample *)buffer;
 
+    //chrdev
     alloc_chrdev_region(&vfd_dev, 0, 1, DEVICE_NAME);
     cdev_init(&vfd, &vfd_ops);
     vfd.owner = THIS_MODULE;
     vfd.ops = &vfd_ops;
     cdev_add(&vfd, vfd_dev, 1);
+
+    //workqueue
+    workqueue = create_workqueue(WORKQUEUE_NAME);
 
     //THE EQUIVALENT TO PRINTF IN KERNEL SPACE
     printk(KERN_ALERT "MODULE LOADED with BUFFER_SIZE=%lu\n", BUFFER_SIZE);
@@ -242,21 +252,26 @@ int __init my_module_init(void)
 //NOTE THE __EXIT ANNOTATION AND THE FUNCTION PROTOTYPE
 void __exit my_module_exit(void)
 {
+    //proc entry
     remove_proc_entry(PROC_FILENAME, proc_dir);
     remove_proc_entry(PROC_DIRNAME, NULL);
 
-    if(workqueue != NULL)
-    {
-        _destroy_workqueue();
-    }
+    //work queue
+    work_done = 1;
+    cancel_delayed_work(&work);
+    flush_workqueue(workqueue);
+    destroy_workqueue(workqueue);
 
+    //chrdev
     unregister_chrdev_region(vfd_dev, 1);
     cdev_del(&vfd);
 
+    //task list
     mutex_lock(&list_mutex);
     _destroy_task_list();
     mutex_unlock(&list_mutex);
 
+    //buffer
     vfree(buffer);
 
     printk(KERN_ALERT "MODULE UNLOADED\n");

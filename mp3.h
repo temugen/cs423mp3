@@ -37,6 +37,7 @@ static struct workqueue_struct *workqueue;
 static char *buffer;
 static struct sample *current_sample;
 static unsigned long last_jiffies;
+static int work_done = 0;
 
 static void work_handler(struct work_struct *w);
 static DECLARE_DELAYED_WORK(work, work_handler);
