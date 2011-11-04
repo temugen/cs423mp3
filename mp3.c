@@ -57,7 +57,6 @@ int deregister_task(unsigned long pid)
         //remove all work
         work_done = 1;
         cancel_delayed_work(&work);
-        flush_workqueue(workqueue);
         //mark the end of our statistics
         current_sample->timestamp = -1;
         current_sample = (struct sample *)buffer;
@@ -81,7 +80,6 @@ static void work_handler(struct work_struct *w)
 
     if(work_done) {
         cancel_delayed_work(&work);
-        work_done = 0;
     }
 
     current_sample->timestamp = jiffies;
@@ -143,6 +141,7 @@ int register_task(unsigned long pid)
     unsigned long temp;
 
     mutex_lock(&list_mutex);
+    //we already have this task registered
     if (_lookup_task(pid) != NULL)
     {
         mutex_unlock(&list_mutex);
@@ -159,6 +158,7 @@ int register_task(unsigned long pid)
     //this is the first task in the list
     if(list_empty(&task_list))
     {
+        work_done = 0;
         last_jiffies = jiffies;
         queue_delayed_work(workqueue, &work, WORK_PERIOD);
     }
