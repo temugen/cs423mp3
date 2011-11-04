@@ -57,6 +57,7 @@ int deregister_task(unsigned long pid)
         //remove all work
         work_done = 1;
         cancel_delayed_work(&work);
+        flush_workqueue(workqueue);
         //mark the end of our statistics
         current_sample->timestamp = -1;
         current_sample = (struct sample *)buffer;
