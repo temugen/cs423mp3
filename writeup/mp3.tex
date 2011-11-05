@@ -37,7 +37,30 @@ We used a static delayed work structure so we didn't have to go and reinitialize
 Graph 1 had a steeper curve than graph 2, though some of that may be distortion because of the scaling of the x axis. The scaling of the x axis is different because graph 1 had a much longer running time (80189 vs 51502 jiffies), which is because graph 1 was made to test random based access, and graph 2 locality based access. Locality based access is faster since it is likely that adjacent memory values are also in already loaded page tables. The random based access needs to swap out more page tables, especially when its buffer size is larger than physical memory. Graph 1 does appear to have more page faults per unit time, which is easy to answer at the surface, for the same reason that random access causes more page faults than locality based access. However, that also means that it takes more time and therefore needs to take longer to recover from those page faults before it has more, probably leading to a cap on the number of page faults possible in one period. The moral of the story is that locality based access is desired if you want to minimize overall page counts and shorten the time taken for a process.
 
 \subsection{Case Study 2: Multiprogramming}
+The utilization increases as N increases. The number of page faults also increase, as well as the completion time. This is a very logical result, considering that more tasks, requiring the same computation, will take a longer time to complete since they are essentially N times the amount of work of one task. The number of page faults also increases because these tasks are competing for pages and having to swap in and out as the tasks themselves are swapped in and out of using the CPU. The utilization also increases because the scheduler will give less time to all other processes the more processes that are added. Since we're adding more processes under our control, we're seeing more total utilization for them.
 
 \subsection{Case Study 3: RT Synchronization}
+Although the data logging needs to be done in real-time, we have a large 30 second deadline to play with, which, with modern computing machines, allows us to hack together a wide variety of solutions that wouldn't work with smaller deadlines. The problem here is that the monitor process, when reading the buffer, might seek too far ahead of the buffer, or lag too far behind and get passed up by the writer, thus losing samples or recording bad data. The intuitive solution is a shared semaphore (perhaps placed in the shared buffer itself), that will be incremented when the kernel module takes a sample, and decremented when the monitor logs a sample. And in fact, this can also be done so that the monitor only tries to read and decrement the semaphore every 30 seconds when a timer goes off. We would prefer this solution, since it is more elegant, but since we don't know a good way to implement a semaphore in a shared kernel-userspace buffer, we will write pseudocode for something less robust. It would also be trivial to have the monitor process register with the kernel module, and, when the first process is registered, a 30 second timer will be started in the kernel module. When this timer goes off, the kernel module writes the address or index of where it is in the ring buffer and sends a signal to the monitor process. The monitor process then reads up to this address/index and logs the data. It then waits for the next signal. It's a ring buffer, so when the reader or writer reach the end of the buffer, they continue back around. \\
+
+\begin{verbatim}
+#buffer_position stores the last saved position 
+#of the kernel module writes to the ring buffer
+
+(module)
+register(type, pid, ...):
+  if type == MONITOR:
+    monitor = pid
+  ...
+  
+timer_handler:
+  *buffer_position = current_sample
+  signal(monitor)
+  
+(monitor)
+signal_handler:
+  while current_sample < *buffer_position:
+    #assume ++ wraps around the ring buffer if needed
+    log(current_sample++)
+\end{verbatim}
 
 \end{document}
