@@ -2,41 +2,42 @@
 
 \begin{document}
 
-\title{CS423: MP2{}}
+\title{CS423: MP3{}}
 \author{Brad Misik and Ivan Hu}
 
 \maketitle
 
 \begin{abstract}
-Implementation, development, and challenges of writing a rate monotonic scheduler for Linux.
+Implementation, development, and case studies of a page fault instrumenting Linux kernel module.
 \end{abstract}
 
 \section{Introduction}
-Although we read through and implemented the MP2 spec step-by-step, there were quite a few places where our implementation deviated. Those deviations, as well as a brief overview of the project and the important observations we had, will be outlined in this document.
+Although we read through and implemented the MP3 spec step-by-step, there were quite a few places where our implementation deviated. Those deviations, as well as a brief overview of the project and the case studies involved, will be outlined in this document.
 
 \subsection{Environment Setup}
-I first mirrored the recommended virtual machine setup locally, because the remote machines were painfully slow to work on. Then, I downloaded the solution to MP1 and used it as a base for MP2. I created a git repo of the root folder and uploaded it to share with the team.
+As with MP2, I used my local virtual machine, because the remote machines were painfully slow to work on. I created a git repo of the root folder of MP2 and uploaded it to share with the team.
 
 \subsection{Initial Development}
-The majority of MP2 was just refactoring the solution from MP1. The struct and variable names were modified, some functions were deleted, but the majority of both the structure, variables in use, and functions remained in the code.
-
-\subsection{Miscellaneous}
-Our test application has a period of 500ms and a computation time of 10ms. It prints out the time difference between every yield, which averages out to near 500ms. We also included a test.sh script which attempts to run and register one more task than is schedulable according to the schedulability test (35). 34 * (10 / 500) = 0.68, 35 * (10 / 500) = 0.7
+The majority of MP3 was just refactoring the solution from MP2. The struct and variable names were modified, some functions were deleted, but the majority of both the structure, variables in use, and functions remained in the code.
 
 \section{Implementation Deviations}
 
-\subsection{Timing}
-Since this is a rate monotonic scheduler, every task timer signals a deadline for when a job must be completed. When that timer goes off, it is intuitively reset, because we are scheduling periodic tasks. That intuition is why our solution deviates from the spec. Instead of calculating the correct deadline time based on a current time and the last firing time during a call to yield(), we reset the task timer in the timer interrupt handler with the task's period. This task period is retrieved from the argument to the interrupt handler, which is set in the timer struct's data member. We do not believe this extra code violates the two halves approach, because the interrupt is still overall very short and resetting a timer here is not unreasonable.
+\subsection{Workqueue}
+For the work queue, we decided to create it when loading our module and destroy it when exiting our module. We had initially followed the spec and had the queue only exist when tasks were in our task list, but the overhead of keeping it in memory is presumed to be negligible, and it makes intuitive sense to have its life span over the life of our module.
 
-\subsection{Task Selection}
-Instead of selecting only Ready tasks, we select Ready or Running tasks to be run next, because there are instances where our dispatching thread is requested to run for rescheduling, and one can imagine that the currently running task may have a shorter period than other Ready tasks, in which case it makes sense for it to continue running.
+\subsection{Buffer Allocation and Mapping}
+In the 2.6 kernel and above, it appears as though the PG\_reserved page flags are being phased out, and the more appropriate (and WAY easier way) of allocation a buffer for use in userspace is the vmalloc\_user() function. Once using this function for buffer allocation, said buffer may be mmaped into a vma by way of the remap\_vmalloc\_range() function. That's it - two simple calls and the blunt of this MP was taken care of.
 
-\subsection{First Scheduling}
-For each newly registered task, we add it to our list and assign it the Registering state. Upon its first yield, its state is set to Ready, the task is put to sleep, and only then is its first timer set.
+\subsection{Work and Monitor}
+We used a static delayed work structure so we didn't have to go and reinitialize our work every period, or have to worry about timers. This was the most simple solution. Our work handler uses a pointer into our vmalloc'd ring buffer to a sample struct. This sample struct has members for all of the necessary values to be stored each period. We modified the monitor process to use this sample struct to easily iterate through the buffer dumping out its data. The included sample header file also defines the number of (max) samples, to synchronize the buffer information between kernel module and monitor.
 
-\section{Challenges}
+\section{Case Studies}
 
-\subsection{Mutual Exclusion}
-The obvious problem in this exercise is guaranteeing mutual exclusion between our two threads (and the interrupt context of the timer handlers). Initially, we used one lock to isolate the critical sections of our list data structure that included: adding to the list in our main kernel thread, removing from the list in our main kernel thread, and reading through the list in our dispatch thread. Since the dispatch thread doesn't insert and remove from the list, this is all that is necessary to avoid collisions. However, these are not the only problems we can incur with regards to mutual exclusion. We also added a lock around part of our yield and deregister functions, with the same lock wrapping most of the context switch of our dispatch thread, and here is why: if we deregister a task that is the current task, we may end up freeing its memory before the dispatch thread attempts to read or modify it, resulting in a use-after-free. Similarly, when yielding, we want to ensure that we set the state of our task to Sleeping and that it doesn't get clobbered in the middle of a context switch.
+\subsection{Case Study 1: Random vs Local}
+Graph 1 had a steeper curve than graph 2, though some of that may be distortion because of the scaling of the x axis. The scaling of the x axis is different because graph 1 had a much longer running time (80189 vs 51502 jiffies), which is because graph 1 was made to test random based access, and graph 2 locality based access. Locality based access is faster since it is likely that adjacent memory values are also in already loaded page tables. The random based access needs to swap out more page tables, especially when its buffer size is larger than physical memory. Graph 1 does appear to have more page faults per unit time, which is easy to answer at the surface, for the same reason that random access causes more page faults than locality based access. However, that also means that it takes more time and therefore needs to take longer to recover from those page faults before it has more, probably leading to a cap on the number of page faults possible in one period. The moral of the story is that locality based access is desired if you want to minimize overall page counts and shorten the time taken for a process.
+
+\subsection{Case Study 2: Multiprogramming}
+
+\subsection{Case Study 3: RT Synchronization}
 
 \end{document}
