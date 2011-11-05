@@ -45,6 +45,7 @@ Although the data logging needs to be done in real-time, we have a large 30 seco
 \begin{verbatim}
 #buffer_position stores the last saved position 
 #of the kernel module writes to the ring buffer
+#in the buffer itself (but outside of the ring)
 
 (module)
 register(type, pid, ...):
